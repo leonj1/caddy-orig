@@ -42,7 +42,11 @@ type ServerlessHandler struct {
 
 	logger           *zap.Logger
 	containerManager ContainerManagerInterface
+	routeMap         methodMap
 }
+
+// methodMap stores a map of HTTP methods to a map of path regexes to function configurations.
+type methodMap map[string]map[*regexp.Regexp]*FunctionConfig
 
 // FunctionConfig represents the configuration for a single serverless function
 type FunctionConfig struct {
@@ -98,36 +102,47 @@ func (ServerlessHandler) CaddyModule() caddy.ModuleInfo {
 func (h *ServerlessHandler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Logger()
 	h.containerManager = NewContainerManager(h.logger)
+	h.routeMap = make(methodMap)
 
-	// Compile regex patterns for path matching
+	// Compile regex patterns for path matching and populate routeMap
 	for i := range h.Functions {
-		if h.Functions[i].Path != "" {
-			regex, err := regexp.Compile(h.Functions[i].Path)
+		fn := &h.Functions[i] // Use a pointer to modify the original slice element
+
+		if fn.Path != "" {
+			regex, err := regexp.Compile(fn.Path)
 			if err != nil {
 				return fmt.Errorf("invalid path regex for function %d: %v", i, err)
 			}
-			h.Functions[i].pathRegex = regex
+			fn.pathRegex = regex
+		} else {
+			return fmt.Errorf("function %d: path is required", i)
 		}
 
 		// Set default port if not specified
-		if h.Functions[i].Port == 0 {
-			h.Functions[i].Port = 8080
+		if fn.Port == 0 {
+			fn.Port = 8080
 		}
 
 		// Set default timeout if not specified
-		if h.Functions[i].Timeout == 0 {
-			h.Functions[i].Timeout = caddy.Duration(30 * time.Second)
+		if fn.Timeout == 0 {
+			fn.Timeout = caddy.Duration(30 * time.Second)
 		}
 
 		// Validate required fields
-		if h.Functions[i].Image == "" {
+		if fn.Image == "" {
 			return fmt.Errorf("function %d: image is required", i)
 		}
-		if len(h.Functions[i].Methods) == 0 {
+		if len(fn.Methods) == 0 {
 			return fmt.Errorf("function %d: at least one method is required", i)
 		}
-		if h.Functions[i].Path == "" {
-			return fmt.Errorf("function %d: path is required", i)
+
+		// Populate the routeMap
+		for _, method := range fn.Methods {
+			upperMethod := strings.ToUpper(method)
+			if h.routeMap[upperMethod] == nil {
+				h.routeMap[upperMethod] = make(map[*regexp.Regexp]*FunctionConfig)
+			}
+			h.routeMap[upperMethod][fn.pathRegex] = fn
 		}
 	}
 
@@ -187,23 +202,15 @@ func (h ServerlessHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, nex
 
 // findMatchingFunction finds the first function that matches the request
 func (h *ServerlessHandler) findMatchingFunction(r *http.Request) *FunctionConfig {
-	for i := range h.Functions {
-		function := &h.Functions[i]
+	requestMethod := strings.ToUpper(r.Method)
+	pathMap, methodExists := h.routeMap[requestMethod]
 
-		// Check if method matches
-		methodMatches := false
-		for _, method := range function.Methods {
-			if strings.EqualFold(method, r.Method) {
-				methodMatches = true
-				break
-			}
-		}
-		if !methodMatches {
-			continue
-		}
+	if !methodExists {
+		return nil
+	}
 
-		// Check if path matches
-		if function.pathRegex != nil && function.pathRegex.MatchString(r.URL.Path) {
+	for pathRegex, function := range pathMap {
+		if pathRegex != nil && pathRegex.MatchString(r.URL.Path) {
 			return function
 		}
 	}
