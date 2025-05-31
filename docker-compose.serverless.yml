@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  caddy-serverless:
+    build:
+      context: .
+      dockerfile: Dockerfile.serverless
+    container_name: caddy-serverless
+    ports:
+      - "8080:8080"
+      - "8443:443"
+    volumes:
+      - ./Caddyfile.serverless.example:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data/caddy
+      - caddy_config:/config/caddy
+    environment:
+      - CADDY_CONFIG_DIR=/config/caddy
+      - CADDY_DATA_DIR=/data/caddy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - caddy-network
+
+  # Example backend service for testing reverse proxy
+  backend:
+    image: nginx:alpine
+    container_name: caddy-backend
+    volumes:
+      - ./test-backend.html:/usr/share/nginx/html/index.html:ro
+    networks:
+      - caddy-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+
+networks:
+  caddy-network:
+    driver: bridge

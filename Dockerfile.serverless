@@ -1,0 +1,58 @@
+# Multi-stage build for Caddy with serverless and JWT plugins
+# Stage 1: Builder
+FROM golang:1.24-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Install xcaddy
+RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+
+# Set working directory
+WORKDIR /build
+
+# Copy the entire Caddy source code (including serverless plugin)
+COPY . .
+
+# Build Caddy with serverless (local) and JWT (external) plugins
+RUN xcaddy build \
+    --with github.com/caddyserver/caddy/v2/modules/caddyhttp/serverless=./modules/caddyhttp/serverless \
+    --with github.com/caddy-dns/jwt
+
+# Stage 2: Runtime
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates mailcap
+
+# Create a non-root user
+RUN addgroup -g 1001 -S caddy && \
+    adduser -u 1001 -S caddy -G caddy
+
+# Copy the binary from builder stage
+COPY --from=builder /build/caddy /usr/bin/caddy
+
+# Give caddy the ability to bind to privileged ports
+RUN setcap 'cap_net_bind_service=+ep' /usr/bin/caddy
+
+# Create directories for Caddy
+RUN mkdir -p /config/caddy /data/caddy /etc/caddy && \
+    chown -R caddy:caddy /config/caddy /data/caddy /etc/caddy
+
+# Switch to non-root user
+USER caddy
+
+# Set environment variables for serverless optimization
+ENV CADDY_CONFIG_DIR=/config/caddy
+ENV CADDY_DATA_DIR=/data/caddy
+
+# Expose HTTP and HTTPS ports
+EXPOSE 80 443
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD caddy version || exit 1
+
+# Default command
+ENTRYPOINT ["/usr/bin/caddy"]
+CMD ["run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
