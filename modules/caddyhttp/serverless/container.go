@@ -302,11 +302,12 @@ func (cm *ContainerManager) stopContainerByID(ctx context.Context, containerID s
 
 	cmd := exec.CommandContext(ctx, "docker", "stop", containerID)
 	if err := cmd.Run(); err != nil {
+		stopErr := err
 		cm.logger.Warn("failed to stop container", zap.String("container_id", containerID), zap.Error(err))
 		// Try to force remove it
 		cmd = exec.CommandContext(ctx, "docker", "rm", "-f", containerID)
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to force remove container: %v", err)
+			return fmt.Errorf("failed to force remove container (stop error: %v): %v", stopErr, err)
 		}
 	}
 
