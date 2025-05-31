@@ -52,6 +52,13 @@ type Container struct {
 	Port int
 }
 
+// VolumeMount represents a Docker volume mount
+type VolumeMount struct {
+	Source   string
+	Target   string
+	ReadOnly bool
+}
+
 // ContainerConfig represents the configuration for starting a container
 type ContainerConfig struct {
 	Image       string
@@ -59,6 +66,58 @@ type ContainerConfig struct {
 	Environment map[string]string
 	Volumes     []VolumeMount
 	Port        int
+}
+
+// validateDockerImage checks if the Docker image name is valid.
+// Basic validation: non-empty. More sophisticated validation can be added,
+// e.g., regex for valid image names from Docker's spec.
+func validateDockerImage(image string) bool {
+	// For now, just ensure it's not empty.
+	// A more robust check might involve parsing image name components (name, tag, digest).
+	return strings.TrimSpace(image) != ""
+}
+
+// validateDockerCommand checks if a Docker command part is valid.
+// Basic validation: non-empty.
+func validateDockerCommand(command string) bool {
+	// For now, just ensure it's not empty.
+	// Further validation could check for disallowed characters or patterns,
+	// but this can be complex and depends on the execution context.
+	return strings.TrimSpace(command) != ""
+}
+
+// validateContainerConfig validates the container configuration fields.
+func validateContainerConfig(config ContainerConfig) error {
+	if !validateDockerImage(config.Image) {
+		return fmt.Errorf("invalid docker image name: '%s'", config.Image)
+	}
+	if len(config.Command) > 0 {
+		for i, cmdPart := range config.Command {
+			if !validateDockerCommand(cmdPart) {
+				return fmt.Errorf("invalid docker command part at index %d: '%s'", i, cmdPart)
+			}
+		}
+	}
+
+	// Validate Environment variables
+	for key, value := range config.Environment {
+		if strings.TrimSpace(key) == "" {
+			return fmt.Errorf("environment variable key cannot be empty")
+		}
+		// Potentially add more checks for key/value formats if needed
+	}
+
+	// Validate Volumes
+	for i, volume := range config.Volumes {
+		if strings.TrimSpace(volume.Source) == "" {
+			return fmt.Errorf("volume mount source cannot be empty at index %d", i)
+		}
+		if strings.TrimSpace(volume.Target) == "" {
+			return fmt.Errorf("volume mount target cannot be empty at index %d", i)
+		}
+		// Potentially add more checks for path validity
+	}
+	return nil
 }
 
 // NewContainerManager creates a new container manager
@@ -71,6 +130,11 @@ func NewContainerManager(logger *zap.Logger) *ContainerManager {
 
 // StartContainer starts a new Docker container with the given configuration
 func (cm *ContainerManager) StartContainer(ctx context.Context, config ContainerConfig) (*Container, error) {
+	// Validate container configuration
+	if err := validateContainerConfig(config); err != nil {
+		return nil, fmt.Errorf("invalid container configuration: %w", err)
+	}
+
 	// Build docker run command
 	args := []string{"run", "-d", "--rm"}
 
