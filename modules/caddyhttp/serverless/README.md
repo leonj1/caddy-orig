@@ -79,7 +79,7 @@ example.com {
 - **path** (required): Regex pattern for URL path matching
 - **image** (required): Docker image to run
 - **command** (optional): Command to execute in the container
-- **environment** (optional): Environment variables to pass to the container
+- **environment** (optional): Environment variables to pass to the container. In the Caddyfile, use multiple `env` lines for multiple variables.
 - **volumes** (optional): Volume mounts for the container
 - **timeout** (optional): Maximum execution time (default: 30s)
 - **port** (optional): Port the container listens on (default: 8080)
