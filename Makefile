@@ -31,6 +31,16 @@ custom-build: ## Build Caddy serverless Docker image using Dockerfile.serverless
 .PHONY: build
 build: custom-build ## Alias for custom-build
 
+.PHONY: extract-binary
+extract-binary: ## Extract the Caddy binary from the Docker image to ./bin/caddy
+	@echo "Extracting Caddy binary to ./bin/caddy..."
+	@mkdir -p ./bin
+	@docker rm temp-caddy-extractor >/dev/null 2>&1 || true
+	@docker create --name temp-caddy-extractor $(IMAGE_NAME):latest >/dev/null
+	@docker cp temp-caddy-extractor:/usr/bin/caddy ./bin/caddy
+	@docker rm temp-caddy-extractor >/dev/null
+	@echo "✅ Caddy binary extracted to ./bin/caddy"
+
 .PHONY: test
 test: custom-build ## Build image and run tests
 	@echo "Running tests for Caddy serverless..."

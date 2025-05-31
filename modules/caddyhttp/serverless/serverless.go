@@ -82,18 +82,6 @@ type FunctionConfig struct {
 	pathRegex *regexp.Regexp
 }
 
-// VolumeMount represents a volume mount configuration
-type VolumeMount struct {
-	// Source is the host path to mount
-	Source string `json:"source,omitempty"`
-
-	// Target is the container path where the volume is mounted
-	Target string `json:"target,omitempty"`
-
-	// ReadOnly specifies if the mount is read-only
-	ReadOnly bool `json:"readonly,omitempty"`
-}
-
 // CaddyModule returns the Caddy module information.
 func (ServerlessHandler) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{

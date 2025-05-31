@@ -101,7 +101,7 @@ func validateContainerConfig(config ContainerConfig) error {
 	}
 
 	// Validate Environment variables
-	for key, value := range config.Environment {
+	for key, _ := range config.Environment {
 		if strings.TrimSpace(key) == "" {
 			return fmt.Errorf("environment variable key cannot be empty")
 		}

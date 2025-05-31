@@ -15,22 +15,23 @@ WORKDIR /build
 COPY . .
 
 # Build Caddy with serverless (local) and JWT (external) plugins
-RUN xcaddy build \
+RUN mkdir -p /build/output && xcaddy build \
+    --output /build/output/caddy \
     --with github.com/caddyserver/caddy/v2/modules/caddyhttp/serverless=./modules/caddyhttp/serverless \
-    --with github.com/caddy-dns/jwt
+    --with github.com/ggicci/caddy-jwt
 
 # Stage 2: Runtime
 FROM alpine:latest
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates mailcap
+RUN apk add --no-cache ca-certificates mailcap libcap
 
 # Create a non-root user
 RUN addgroup -g 1001 -S caddy && \
     adduser -u 1001 -S caddy -G caddy
 
 # Copy the binary from builder stage
-COPY --from=builder /build/caddy /usr/bin/caddy
+COPY --from=builder /build/output/caddy /usr/bin/caddy
 
 # Give caddy the ability to bind to privileged ports
 RUN setcap 'cap_net_bind_service=+ep' /usr/bin/caddy
