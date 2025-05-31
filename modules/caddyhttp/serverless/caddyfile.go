@@ -135,6 +135,13 @@ func (h *ServerlessHandler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				}
 			}
 
+			// After the function configuration block
+			if function.Image == "" {
+				return d.Errf("image is required for serverless function")
+			}
+			if function.Path == "" {
+				return d.Errf("path is required for serverless function")
+			}
 			h.Functions = append(h.Functions, function)
 
 		default:
