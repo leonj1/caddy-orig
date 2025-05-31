@@ -232,6 +232,10 @@ func (h *ServerlessHandler) executeFunction(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(function.Timeout))
 	defer cancel()
 
+	// Create a separate context for container lifecycle operations to ensure cleanup
+	// operations are not affected by request context cancellation or timeout
+	lifecycleCtx := context.Background()
+
 	// Prepare container configuration
 	config := ContainerConfig{
 		Image:       function.Image,
@@ -252,9 +256,10 @@ func (h *ServerlessHandler) executeFunction(w http.ResponseWriter, r *http.Reque
 		return caddyhttp.Error(http.StatusInternalServerError, err)
 	}
 
-	// Ensure container cleanup
+	// Ensure container cleanup using lifecycle context to prevent cleanup failures
+	// due to request context cancellation or timeout
 	defer func() {
-		if err := h.containerManager.StopContainer(ctx, container.ID); err != nil {
+		if err := h.containerManager.StopContainer(lifecycleCtx, container.ID); err != nil {
 			h.logger.Error("failed to stop container", zap.String("container_id", container.ID), zap.Error(err))
 		}
 	}()
