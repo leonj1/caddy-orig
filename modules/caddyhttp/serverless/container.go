@@ -29,7 +29,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// ContainerManagerInterface defines the interface for container management
+// ContainerManagerInterface defines the abstraction for managing Docker containers,
+// allowing for easier testing and potential support for alternative container runtimes.
 type ContainerManagerInterface interface {
 	StartContainer(ctx context.Context, config ContainerConfig) (*Container, error)
 	WaitForReady(ctx context.Context, container *Container, timeout time.Duration) error
