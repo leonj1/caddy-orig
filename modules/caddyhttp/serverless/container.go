@@ -43,6 +43,7 @@ type ContainerManager struct {
 	logger     *zap.Logger
 	containers map[string]*Container
 	mutex      sync.RWMutex
+	httpClient *http.Client
 }
 
 // Container represents a running Docker container
@@ -125,6 +126,14 @@ func NewContainerManager(logger *zap.Logger) *ContainerManager {
 	return &ContainerManager{
 		logger:     logger,
 		containers: make(map[string]*Container),
+		httpClient: &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				IdleConnTimeout:     90 * time.Second,
+				DisableCompression: true,
+			},
+		},
 	}
 }
 
@@ -340,17 +349,13 @@ func (cm *ContainerManager) Cleanup() error {
 
 // HealthCheck performs a health check on a container
 func (cm *ContainerManager) HealthCheck(ctx context.Context, container *Container) error {
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-
 	url := fmt.Sprintf("http://%s:%d/health", container.IP, container.Port)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
 	}
 
-	resp, err := client.Do(req)
+	resp, err := cm.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
