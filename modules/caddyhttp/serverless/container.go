@@ -256,7 +256,7 @@ func (cm *ContainerManager) getContainerInfo(ctx context.Context, containerID st
 
 	return &Container{
 		ID:   containerID,
-		IP:   "127.0.0.1", // Use localhost since we're using port mapping
+		IP:   ipAddress,
 		Port: hostPort,
 	}, nil
 }
