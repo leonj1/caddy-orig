@@ -192,8 +192,15 @@ func (cm *ContainerManager) StartContainer(ctx context.Context, config Container
 	container, err := cm.getContainerInfo(ctx, containerID, config.Port)
 	if err != nil {
 		// Clean up the container if we can't get its info
-		cm.stopContainerByID(ctx, containerID)
-		return nil, fmt.Errorf("failed to get container info: %v", err)
+		cm.logger.Warn("Failed to get container info, attempting to stop container", zap.String("container_id", containerID), zap.Error(err))
+		if stopErr := cm.stopContainerByID(ctx, containerID); stopErr != nil {
+			cm.logger.Error("Failed to stop container after failing to get its info", zap.String("container_id", containerID), zap.Error(stopErr))
+			// Return an error that includes both the original error and the stop error
+			return nil, fmt.Errorf("failed to get container info for %s: %w; additionally, failed to stop container: %v", containerID, err, stopErr)
+		}
+		cm.logger.Info("Successfully stopped container after failing to get its info", zap.String("container_id", containerID))
+		// Return the original error, noting that the container was stopped
+		return nil, fmt.Errorf("failed to get container info for %s: %w (container has been stopped)", containerID, err)
 	}
 
 	// Store container reference
