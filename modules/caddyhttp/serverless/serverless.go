@@ -228,7 +228,11 @@ func (h *ServerlessHandler) executeFunction(w http.ResponseWriter, r *http.Reque
 	// Start container
 	container, err := h.containerManager.StartContainer(ctx, config)
 	if err != nil {
-		h.logger.Error("failed to start container", zap.Error(err))
+		h.logger.Error("failed to start container",
+			zap.Error(err),
+			zap.String("image", config.Image),
+			zap.Int("port", config.Port),
+			zap.Duration("timeout", time.Duration(function.Timeout)))
 		return caddyhttp.Error(http.StatusInternalServerError, err)
 	}
 
