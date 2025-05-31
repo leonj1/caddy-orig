@@ -156,7 +156,11 @@ func (h *ServerlessHandler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 // /host/path:/container/path[:ro]
 func parseVolumeSpec(spec string) (VolumeMount, error) {
 	parts := strings.Split(spec, ":")
-	if len(parts) < 2 || len(parts) > 3 {
+	const (
+		minVolumeSpecParts = 2
+		maxVolumeSpecParts = 3
+	)
+	if len(parts) < minVolumeSpecParts || len(parts) > maxVolumeSpecParts {
 		return VolumeMount{}, fmt.Errorf("invalid volume format (expected /host/path:/container/path[:ro])")
 	}
 
