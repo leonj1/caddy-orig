@@ -163,6 +163,47 @@ node.example.com {
 }
 ```
 
+### Advanced Rate Limiting Example
+
+This example demonstrates how to implement different rate limits for GET and POST/PUT/PATCH/DELETE requests to an API, in conjunction with the serverless plugin. It also shows how to return a custom error message for rate-limited requests.
+
+```caddyfile
+example.com {
+    # Different rate limits for different endpoints
+    @get_requests {
+        path /api/*
+        method GET
+    }
+    rate_limit @get_requests 100r/m
+
+    @post_requests {
+        path /api/*
+        method POST PUT PATCH DELETE
+    }
+    rate_limit @post_requests 20r/m
+
+    # Serverless configuration
+    serverless {
+        function {
+            methods GET POST PUT DELETE
+            path /api/users/.*
+            image my-function:latest
+            timeout 30s
+        }
+    }
+
+    # Return 429 Too Many Requests with a custom error message
+    handle_errors {
+        @rate_limited {
+            expression {http.error.status_code} == 429
+        }
+        respond @rate_limited 429 {
+            body "Rate limit exceeded. Please try again later."
+        }
+    }
+}
+```
+
 ## Requirements
 
 - Docker must be installed and accessible via the `docker` command
