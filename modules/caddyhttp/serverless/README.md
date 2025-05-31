@@ -51,21 +51,15 @@ example.com {
     serverless {
         function {
             methods GET POST
-            path /api/users/.*
-            image my-function:latest
-            command /app/handler
-            env DATABASE_URL=postgres://localhost/mydb
-            env API_KEY=secret
-            volume /host/data:/app/data:ro
+            path /api/.*
+            image nginx:latest
+            command /bin/sh -c "echo hello"
+            env KEY=value
+            env ANOTHER=test
+            volume /host:/container
+            volume /host2:/container2:ro
             timeout 30s
             port 8080
-        }
-        
-        function {
-            methods DELETE
-            path /api/admin/.*
-            image admin-function:latest
-            timeout 60s
         }
     }
 }
