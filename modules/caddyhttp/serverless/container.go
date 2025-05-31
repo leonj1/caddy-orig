@@ -167,9 +167,9 @@ func (cm *ContainerManager) StartContainer(ctx context.Context, config Container
 
 	// Execute docker run command
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("failed to start container: %v", err)
+		return nil, fmt.Errorf("failed to start container: %v (output: %s)", err, string(output))
 	}
 
 	containerID := strings.TrimSpace(string(output))
