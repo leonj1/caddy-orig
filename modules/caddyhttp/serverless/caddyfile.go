@@ -16,6 +16,7 @@ package serverless
 
 import (
 	"fmt"
+	"regexp" // Added for environment variable name validation
 	"strconv"
 	"strings"
 	"time"
@@ -90,9 +91,28 @@ func (h *ServerlessHandler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					envVar := d.Val()
 					parts := strings.SplitN(envVar, "=", 2)
 					if len(parts) != 2 {
+						// This handles cases like "KEY" without "=", ensuring "KEY=value" structure.
+						// For "KEY=", parts will be ["KEY", ""], so len(parts) == 2, which is valid.
 						return d.Errf("invalid environment variable format: %s (expected KEY=value)", envVar)
 					}
-					function.Environment[parts[0]] = parts[1]
+
+					key := parts[0]
+					value := parts[1]
+
+					// Validate environment variable name
+					if key == "" {
+						return d.Errf("environment variable name cannot be empty")
+					}
+					// Regex for valid env var names: must start with a letter or underscore,
+					// and can only contain letters, numbers, or underscores.
+					// This aligns with common practices (e.g., POSIX-like, but allowing lowercase).
+					isValidName, _ := regexp.MatchString(`^[a-zA-Z_][a-zA-Z0-9_]*$`, key) // Error from MatchString is ignored as the regex is constant.
+					if !isValidName {
+						return d.Errf("invalid environment variable name: '%s'. Name must start with a letter or underscore, and can only contain letters, numbers, or underscores.", key)
+					}
+
+					// Store the environment variable. Empty values (e.g., "KEY=") are allowed and will be stored as empty strings.
+					function.Environment[key] = value
 
 				case "volume":
 					if !d.NextArg() {
