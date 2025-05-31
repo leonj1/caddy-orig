@@ -40,6 +40,10 @@ type ServerlessHandler struct {
 	// Functions defines the serverless function configurations
 	Functions []FunctionConfig `json:"functions,omitempty"`
 
+	// HTTPClient is the client used to make requests to containers.
+	// It can be overridden for testing.
+	HTTPClient *http.Client `json:"-"`
+
 	logger           *zap.Logger
 	containerManager ContainerManagerInterface
 	routeMap         methodMap
@@ -101,6 +105,11 @@ func (ServerlessHandler) CaddyModule() caddy.ModuleInfo {
 // Provision sets up the serverless handler.
 func (h *ServerlessHandler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Logger()
+	if h.HTTPClient == nil {
+		h.HTTPClient = &http.Client{
+			Timeout: 30 * time.Second, // Default timeout
+		}
+	}
 	h.containerManager = NewContainerManager(h.logger)
 	h.routeMap = make(methodMap)
 
@@ -281,11 +290,7 @@ func (h *ServerlessHandler) proxyToContainer(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Make request to container
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	resp, err := client.Do(req)
+	resp, err := h.HTTPClient.Do(req)
 	if err != nil {
 		h.logger.Error("failed to proxy request to container", zap.Error(err))
 		return caddyhttp.Error(http.StatusBadGateway, err)

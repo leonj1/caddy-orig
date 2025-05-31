@@ -15,17 +15,52 @@
 package serverless
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 )
+
+// fakeRequest is a helper to create mock HTTP requests for testing
+func fakeRequest(method, path string) *http.Request {
+	r := httptest.NewRequest(method, path, nil)
+	// Add a context that won't be canceled prematurely, similar to what caddyhttp.Context would provide
+	// This helps avoid "context canceled" errors in tests if the test finishes before the handler.
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute) // Generous timeout for test
+	// Normally, you'd use defer cancel(), but since the request's lifetime is tied to the test,
+	// and we're just providing a context, this is okay. The test's own context management (if any)
+	// or the handler's context management will take precedence.
+	// For more complex scenarios, ensure proper context cancellation.
+	_ = cancel // Avoid unused variable error if not immediately used.
+	return r.WithContext(ctx)
+}
+
+// MockRoundTripper is a custom http.RoundTripper for mocking HTTP responses
+type MockRoundTripper struct {
+	Response    *http.Response
+	Error       error
+	RequestFunc func(req *http.Request) // Optional: to inspect the request
+}
+
+// RoundTrip implements the http.RoundTripper interface
+func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if m.RequestFunc != nil {
+		m.RequestFunc(req)
+	}
+	if m.Error != nil {
+		return nil, m.Error
+	}
+	return m.Response, nil
+}
 
 // MockContainerManager is a mock implementation for testing
 type MockContainerManager struct {
@@ -110,6 +145,16 @@ func TestServerlessHandler_Integration(t *testing.T) {
 	mockCM := NewMockContainerManager()
 	handler.containerManager = mockCM
 
+	// Create a mock HTTP client
+	mockRT := &MockRoundTripper{
+		Response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("mocked response")),
+			Header:     make(http.Header),
+		},
+	}
+	handler.HTTPClient = &http.Client{Transport: mockRT}
+
 	// Create a test request
 	req := fakeRequest("GET", "/api/test/123")
 	w := httptest.NewRecorder()
@@ -121,17 +166,85 @@ func TestServerlessHandler_Integration(t *testing.T) {
 		return nil
 	})
 
-	// Execute the handler - this will fail at the proxy stage since we can't mock that easily
-	// but we can verify that the container management works
+	// Execute the handler
 	err = handler.ServeHTTP(w, req, next)
 
-	// We expect an error because we can't actually proxy to a real container
-	if err == nil {
-		t.Error("expected error when trying to proxy to non-existent container")
+	// We expect no error now that the proxy is mocked
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
 
 	if nextCalled {
 		t.Error("next handler should not have been called")
+	}
+
+	// Check the response
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+	expectedBody := "mocked response"
+	if w.Body.String() != expectedBody {
+		t.Errorf("expected body '%s', got '%s'", expectedBody, w.Body.String())
+	}
+
+	// Check that container was started and stopped
+	if len(mockCM.containers) != 0 {
+		t.Errorf("expected containers to be cleaned up, but %d remain", len(mockCM.containers))
+	}
+}
+
+// TestServerlessHandler_Integration_ProxyFailure tests the proxy failure path
+func TestServerlessHandler_Integration_ProxyFailure(t *testing.T) {
+	// Create handler with mock container manager
+	handler := &ServerlessHandler{
+		Functions: []FunctionConfig{
+			{
+				Methods:   []string{"GET"},
+				Path:      "/api/proxyfail",
+				Image:     "test:latest",
+				Port:      8080,
+				Timeout:   caddy.Duration(30 * time.Second),
+				pathRegex: regexp.MustCompile("/api/proxyfail"),
+			},
+		},
+	}
+
+	// Provision the handler
+	ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
+	defer cancel()
+	if err := handler.Provision(ctx); err != nil {
+		t.Fatalf("failed to provision handler: %v", err)
+	}
+
+	// Replace the container manager with a mock
+	mockCM := NewMockContainerManager()
+	handler.containerManager = mockCM
+
+	// Create a mock HTTP client that returns an error
+	mockRT := &MockRoundTripper{
+		Error: fmt.Errorf("mock proxy error"),
+	}
+	handler.HTTPClient = &http.Client{Transport: mockRT}
+
+	// Create a test request
+	req := fakeRequest("GET", "/api/proxyfail")
+	w := httptest.NewRecorder()
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error { return nil })
+
+	// Execute the handler
+	err := handler.ServeHTTP(w, req, next)
+
+	// We expect an error because the mocked proxy call fails
+	if err == nil {
+		t.Error("expected error when proxying fails")
+	} else {
+		if herr, ok := err.(caddyhttp.HandlerError); ok {
+			if herr.StatusCode != http.StatusBadGateway {
+				t.Errorf("expected status %d for proxy error, got %d", http.StatusBadGateway, herr.StatusCode)
+			}
+		} else {
+			t.Errorf("expected HandlerError, got %T: %v", err, err)
+		}
 	}
 
 	// Check that container was started and stopped
@@ -151,6 +264,14 @@ func TestServerlessHandler_NoMatchPassesToNext(t *testing.T) {
 			},
 		},
 	}
+	// Provision the handler to initialize logger and regexes
+	ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
+	defer cancel()
+	errProvision := handler.Provision(ctx)
+	if errProvision != nil {
+		t.Fatalf("failed to provision handler: %v", errProvision)
+	}
+
 
 	req := fakeRequest("POST", "/other/path")
 	w := httptest.NewRecorder()
@@ -338,12 +459,21 @@ func TestServerlessHandler_MethodCaseInsensitive(t *testing.T) {
 	handler := &ServerlessHandler{
 		Functions: []FunctionConfig{
 			{
-				Methods:   []string{"GET", "post"},
-				Path:      "/test",
-				pathRegex: regexp.MustCompile("/test"),
+				Methods: []string{"GET", "post"},
+				Path:    "/test",
+				// pathRegex will be compiled during Provision
 			},
 		},
 	}
+
+	// Provision the handler to compile regexes and initialize routeMap
+	ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
+	defer cancel()
+	errProvision := handler.Provision(ctx)
+	if errProvision != nil {
+		t.Fatalf("failed to provision handler: %v", errProvision)
+	}
+
 
 	tests := []struct {
 		method      string
