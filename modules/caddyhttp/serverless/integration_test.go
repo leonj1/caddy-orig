@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -191,6 +192,205 @@ func TestServerlessHandler_Integration(t *testing.T) {
 	if len(mockCM.containers) != 0 {
 		t.Errorf("expected containers to be cleaned up, but %d remain", len(mockCM.containers))
 	}
+}
+
+// TestServerlessHandler_FullProxyIntegration tests the complete proxy flow with a real backend server
+func TestServerlessHandler_FullProxyIntegration(t *testing.T) {
+	// Start a test HTTP server to act as the backend container
+	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Echo back request information to verify proxy functionality
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Backend-Server", "test-container")
+		w.WriteHeader(http.StatusOK)
+		
+		response := map[string]interface{}{
+			"method":      r.Method,
+			"path":        r.URL.Path,
+			"query":       r.URL.RawQuery,
+			"headers":     r.Header,
+			"remote_addr": r.RemoteAddr,
+		}
+		
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer backendServer.Close()
+
+	// Parse the backend server URL to get host and port
+	backendURL := backendServer.URL
+	parts := strings.Split(strings.TrimPrefix(backendURL, "http://"), ":")
+	if len(parts) != 2 {
+		t.Fatalf("unexpected backend server URL format: %s", backendURL)
+	}
+	backendHost := parts[0]
+	backendPort := parts[1]
+	backendPortInt := 0
+	if port, err := json.Number(backendPort).Int64(); err == nil {
+		backendPortInt = int(port)
+	} else {
+		t.Fatalf("failed to parse backend port: %v", err)
+	}
+
+	// Create a mock container manager that returns the backend server details
+	mockCM := &MockContainerManager{
+		containers: make(map[string]*Container),
+	}
+
+	// Override StartContainer to return a container pointing to our test server
+	originalStartContainer := mockCM.StartContainer
+	mockCM.StartContainer = func(ctx context.Context, config ContainerConfig) (*Container, error) {
+		container := &Container{
+			ID:   "test-container-id",
+			IP:   backendHost,
+			Port: backendPortInt,
+		}
+		mockCM.containers[container.ID] = container
+		return container, nil
+	}
+
+	// Create handler with the mock container manager
+	handler := &ServerlessHandler{
+		Functions: []FunctionConfig{
+			{
+				Methods:   []string{"GET", "POST"},
+				Path:      "/api/function.*",
+				Image:     "test:latest",
+				Port:      8080,
+				Timeout:   caddy.Duration(30 * time.Second),
+				pathRegex: regexp.MustCompile("/api/function.*"),
+			},
+		},
+	}
+
+	// Provision the handler
+	ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
+	defer cancel()
+	err := handler.Provision(ctx)
+	if err != nil {
+		t.Fatalf("failed to provision handler: %v", err)
+	}
+
+	// Replace the container manager with our mock
+	handler.containerManager = mockCM
+
+	// Test GET request
+	t.Run("GET request with query parameters", func(t *testing.T) {
+		req := fakeRequest("GET", "/api/function/test?param1=value1&param2=value2")
+		req.Header.Set("X-Test-Header", "test-value")
+		req.Header.Set("User-Agent", "test-agent")
+		w := httptest.NewRecorder()
+
+		next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+			t.Error("next handler should not be called")
+			return nil
+		})
+
+		err := handler.ServeHTTP(w, req, next)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify response status
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+		}
+
+		// Verify backend server header was set
+		if w.Header().Get("X-Backend-Server") != "test-container" {
+			t.Errorf("expected X-Backend-Server header to be 'test-container', got '%s'", w.Header().Get("X-Backend-Server"))
+		}
+
+		// Parse and verify response body
+		var response map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("failed to parse response JSON: %v", err)
+		}
+
+		// Verify request details were proxied correctly
+		if response["method"] != "GET" {
+			t.Errorf("expected method 'GET', got '%v'", response["method"])
+		}
+		if response["path"] != "/api/function/test" {
+			t.Errorf("expected path '/api/function/test', got '%v'", response["path"])
+		}
+		if response["query"] != "param1=value1&param2=value2" {
+			t.Errorf("expected query 'param1=value1&param2=value2', got '%v'", response["query"])
+		}
+
+		// Verify headers were proxied
+		headers, ok := response["headers"].(map[string]interface{})
+		if !ok {
+			t.Fatal("headers not found in response")
+		}
+		
+		// Check that our custom header was proxied
+		testHeader, exists := headers["X-Test-Header"]
+		if !exists {
+			t.Error("X-Test-Header was not proxied to backend")
+		} else if headerSlice, ok := testHeader.([]interface{}); ok && len(headerSlice) > 0 {
+			if headerSlice[0] != "test-value" {
+				t.Errorf("expected X-Test-Header value 'test-value', got '%v'", headerSlice[0])
+			}
+		}
+	})
+
+	// Test POST request with body
+	t.Run("POST request with JSON body", func(t *testing.T) {
+		requestBody := `{"key": "value", "number": 42}`
+		req := httptest.NewRequest("POST", "/api/function/submit", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.Background())
+		w := httptest.NewRecorder()
+
+		next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+			t.Error("next handler should not be called")
+			return nil
+		})
+
+		err := handler.ServeHTTP(w, req, next)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify response
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+		}
+
+		var response map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("failed to parse response JSON: %v", err)
+		}
+
+		if response["method"] != "POST" {
+			t.Errorf("expected method 'POST', got '%v'", response["method"])
+		}
+		if response["path"] != "/api/function/submit" {
+			t.Errorf("expected path '/api/function/submit', got '%v'", response["path"])
+		}
+
+		// Verify Content-Type header was proxied
+		headers, ok := response["headers"].(map[string]interface{})
+		if !ok {
+			t.Fatal("headers not found in response")
+		}
+		
+		contentType, exists := headers["Content-Type"]
+		if !exists {
+			t.Error("Content-Type header was not proxied to backend")
+		} else if headerSlice, ok := contentType.([]interface{}); ok && len(headerSlice) > 0 {
+			if headerSlice[0] != "application/json" {
+				t.Errorf("expected Content-Type 'application/json', got '%v'", headerSlice[0])
+			}
+		}
+	})
+
+	// Verify container cleanup
+	if len(mockCM.containers) != 0 {
+		t.Errorf("expected containers to be cleaned up, but %d remain", len(mockCM.containers))
+	}
+
+	// Restore original StartContainer method
+	mockCM.StartContainer = originalStartContainer
 }
 
 // TestServerlessHandler_Integration_ProxyFailure tests the proxy failure path
