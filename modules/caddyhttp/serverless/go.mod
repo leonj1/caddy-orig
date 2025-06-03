@@ -1,8 +1,7 @@
 module github.com/caddyserver/caddy/v2/modules/caddyhttp/serverless
 
-go 1.21
+go 1.20
 
 require (
 	github.com/caddyserver/caddy/v2 v2.10.0
-	go.uber.org/zap v1.27.0
 )

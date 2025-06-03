@@ -4,7 +4,9 @@ FROM golang:1.20-alpine AS builder
 WORKDIR /app
 
 # Copy the Go module files and download dependencies
-COPY go.mod go.sum ./
+COPY go.mod ./
+# Copy go.sum if it exists (for modules with dependencies)
+COPY go.su[m] ./
 RUN go mod download
 
 # Copy the source code

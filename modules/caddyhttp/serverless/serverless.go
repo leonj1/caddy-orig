@@ -259,13 +259,14 @@ func (h *ServerlessHandler) executeFunction(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Proxy request to container
-	return h.proxyToContainer(w, r, container)
+	return h.proxyToContainer(w, r, container, function.Port)
 }
 
 // proxyToContainer proxies the HTTP request to the running container
-func (h *ServerlessHandler) proxyToContainer(w http.ResponseWriter, r *http.Request, container *Container) error {
+func (h *ServerlessHandler) proxyToContainer(w http.ResponseWriter, r *http.Request, container *Container, internalAppPort int) error {
 	// Create request to container
-	containerURL := fmt.Sprintf("http://%s:%d%s", container.IP, container.Port, r.URL.Path)
+	// Use localhost (127.0.0.1) and container.Port (the mapped port)
+	containerURL := fmt.Sprintf("http://127.0.0.1:%d%s", container.Port, r.URL.Path)
 	if r.URL.RawQuery != "" {
 		containerURL += "?" + r.URL.RawQuery
 	}

@@ -15,7 +15,6 @@
 package serverless
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -65,33 +64,47 @@ func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 
 // MockContainerManager is a mock implementation for testing
 type MockContainerManager struct {
-	containers map[string]*Container
-	shouldFail bool
+	containers        map[string]*Container
+	shouldFail        bool
+	startContainerFn  func(ctx context.Context, config ContainerConfig) (*Container, error)
 }
 
 func NewMockContainerManager() *MockContainerManager {
-	return &MockContainerManager{
+	m := &MockContainerManager{
 		containers: make(map[string]*Container),
 	}
+
+	// Set default StartContainer implementation
+	m.startContainerFn = func(ctx context.Context, config ContainerConfig) (*Container, error) {
+		if m.shouldFail {
+			return nil, &MockError{message: "mock container start failure"}
+		}
+
+		container := &Container{
+			ID:   "mock-container-id",
+			IP:   "127.0.0.1",
+			Port: 8080,
+		}
+
+		m.containers[container.ID] = container
+		return container, nil
+	}
+
+	return m
+}
+
+// StartContainer implements ContainerManagerInterface by calling the function field
+func (m *MockContainerManager) StartContainer(ctx context.Context, config ContainerConfig) (*Container, error) {
+	return m.startContainerFn(ctx, config)
+}
+
+// SetStartContainerFunc allows overriding the StartContainer behavior
+func (m *MockContainerManager) SetStartContainerFunc(fn func(ctx context.Context, config ContainerConfig) (*Container, error)) {
+	m.startContainerFn = fn
 }
 
 // Ensure MockContainerManager implements ContainerManagerInterface
 var _ ContainerManagerInterface = (*MockContainerManager)(nil)
-
-func (m *MockContainerManager) StartContainer(ctx context.Context, config ContainerConfig) (*Container, error) {
-	if m.shouldFail {
-		return nil, &MockError{message: "mock container start failure"}
-	}
-	
-	container := &Container{
-		ID:   "mock-container-id",
-		IP:   "127.0.0.1",
-		Port: 8080,
-	}
-	
-	m.containers[container.ID] = container
-	return container, nil
-}
 
 func (m *MockContainerManager) WaitForReady(ctx context.Context, container *Container, timeout time.Duration) error {
 	if m.shouldFail {
@@ -231,13 +244,11 @@ func TestServerlessHandler_FullProxyIntegration(t *testing.T) {
 	}
 
 	// Create a mock container manager that returns the backend server details
-	mockCM := &MockContainerManager{
-		containers: make(map[string]*Container),
-	}
+	mockCM := NewMockContainerManager()
 
 	// Override StartContainer to return a container pointing to our test server
-	originalStartContainer := mockCM.StartContainer
-	mockCM.StartContainer = func(ctx context.Context, config ContainerConfig) (*Container, error) {
+	originalStartContainer := mockCM.startContainerFn
+	mockCM.SetStartContainerFunc(func(ctx context.Context, config ContainerConfig) (*Container, error) {
 		container := &Container{
 			ID:   "test-container-id",
 			IP:   backendHost,
@@ -245,7 +256,7 @@ func TestServerlessHandler_FullProxyIntegration(t *testing.T) {
 		}
 		mockCM.containers[container.ID] = container
 		return container, nil
-	}
+	})
 
 	// Create handler with the mock container manager
 	handler := &ServerlessHandler{
@@ -254,7 +265,7 @@ func TestServerlessHandler_FullProxyIntegration(t *testing.T) {
 				Methods:   []string{"GET", "POST"},
 				Path:      "/api/function.*",
 				Image:     "test:latest",
-				Port:      8080,
+				Port:      backendPortInt, // Use the actual port of the mock backend server
 				Timeout:   caddy.Duration(30 * time.Second),
 				pathRegex: regexp.MustCompile("/api/function.*"),
 			},
@@ -390,7 +401,7 @@ func TestServerlessHandler_FullProxyIntegration(t *testing.T) {
 	}
 
 	// Restore original StartContainer method
-	mockCM.StartContainer = originalStartContainer
+	mockCM.startContainerFn = originalStartContainer
 }
 
 // TestServerlessHandler_Integration_ProxyFailure tests the proxy failure path
@@ -460,6 +471,7 @@ func TestServerlessHandler_NoMatchPassesToNext(t *testing.T) {
 			{
 				Methods:   []string{"GET"},
 				Path:      "/api/test",
+				Image:     "test:latest",
 				pathRegex: regexp.MustCompile("/api/test"),
 			},
 		},
@@ -661,6 +673,7 @@ func TestServerlessHandler_MethodCaseInsensitive(t *testing.T) {
 			{
 				Methods: []string{"GET", "post"},
 				Path:    "/test",
+				Image:   "test:latest",
 				// pathRegex will be compiled during Provision
 			},
 		},

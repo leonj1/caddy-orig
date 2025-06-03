@@ -21,12 +21,19 @@ help: ## Show this help message
 	@echo "  make up             # Start with docker-compose"
 
 .PHONY: custom-build
-custom-build: ## Build Caddy serverless Docker image using Dockerfile.serverless
+custom-build: ## Build Caddy serverless Docker image using Dockerfile.serverless and extract the binary
 	@echo "Building Caddy serverless image..."
 	docker build -f $(DOCKERFILE) -t $(IMAGE_NAME) .
 	@echo "✅ Build completed successfully!"
 	@echo "Image: $(IMAGE_NAME)"
 	@docker images $(IMAGE_NAME)
+	@mkdir -p ./bin
+	@echo "Extracting Caddy binary from container..."
+	@docker create --name caddy-temp $(IMAGE_NAME)
+	@docker cp caddy-temp:/usr/bin/caddy ./bin/
+	@docker rm caddy-temp
+	@chmod +x ./bin/caddy
+	@echo "✅ Caddy binary extracted to ./bin/caddy"
 
 .PHONY: build
 build: custom-build ## Alias for custom-build

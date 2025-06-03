@@ -18,7 +18,8 @@ COPY . .
 RUN mkdir -p /build/output && xcaddy build \
     --output /build/output/caddy \
     --with github.com/caddyserver/caddy/v2/modules/caddyhttp/serverless=./modules/caddyhttp/serverless \
-    --with github.com/ggicci/caddy-jwt
+    --with github.com/ggicci/caddy-jwt \
+    --with github.com/mholt/caddy-ratelimit
 
 # Stage 2: Runtime
 FROM alpine:latest

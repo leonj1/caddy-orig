@@ -288,8 +288,9 @@ func (cm *ContainerManager) WaitForReady(ctx context.Context, container *Contain
 		default:
 		}
 
-		// Try to connect to the container
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", container.IP, container.Port), time.Second)
+		// Try to connect to the container's host-mapped port from the host.
+		// container.Port is the host-mapped port.
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", container.Port), time.Second)
 		if err == nil {
 			conn.Close()
 			cm.logger.Debug("container is ready", zap.String("container_id", container.ID))

@@ -1,8 +1,7 @@
-package serverless
+package serverless_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,15 +16,17 @@ import (
 )
 
 const (
-	testDockerImageName = "caddy-serverless-echoserver-test"
-	testDockerImageTag  = "latest"
-	echoServerDir       = "./testdata/echoserver"
+	goEchoServerDir         = "./testdata/echoserver"
+	goTestDockerImageName   = "caddy-serverless-go-echoserver-test"
+	pyEchoServerDir         = "./testdata/pyechoserver"
+	pyTestDockerImageName   = "caddy-serverless-py-echoserver-test"
+	commonTestDockerImageTag = "latest"
 )
 
-// Helper to build the test Docker image
-func buildTestImage(t *testing.T) string {
+// Helper to build a test Docker image
+func buildTestImage(t *testing.T, imageName, imageTag, buildContextDir string) string {
 	t.Helper()
-	imageFullName := fmt.Sprintf("%s:%s", testDockerImageName, testDockerImageTag)
+	imageFullName := fmt.Sprintf("%s:%s", imageName, imageTag)
 
 	// Check if image already exists
 	cmdCheck := exec.Command("docker", "image", "inspect", imageFullName)
@@ -34,8 +35,8 @@ func buildTestImage(t *testing.T) string {
 		return imageFullName
 	}
 
-	t.Logf("Building Docker image %s from %s", imageFullName, echoServerDir)
-	cmd := exec.Command("docker", "build", "-t", imageFullName, echoServerDir)
+	t.Logf("Building Docker image %s from %s", imageFullName, buildContextDir)
+	cmd := exec.Command("docker", "build", "-t", imageFullName, buildContextDir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -74,20 +75,25 @@ func TestServerlessPlugin_PostEcho(t *testing.T) {
 		t.Skip("Docker not found in PATH, skipping integration test")
 	}
 
-	imageFullName := buildTestImage(t)
+	imageFullName := buildTestImage(t, goTestDockerImageName, commonTestDockerImageTag, goEchoServerDir)
 	// Defer image removal, but only if it was built by this test run (or if we decide to always try removing)
 	// For simplicity in this example, we'll always try to remove it.
 	// A more robust solution might involve checking if the image existed before the test.
 	defer removeTestImage(t, imageFullName)
 
 	// Define Caddy JSON configuration
+	// Ensure admin API is configured to listen on caddytest.Default.AdminPort (2999)
+	// as caddytest will continue to try and communicate with it on that port.
 	caddyJSON := fmt.Sprintf(`
 	{
+		"admin": {
+			"listen": "localhost:2999"
+		},
 		"apps": {
 			"http": {
 				"servers": {
 					"srv0": {
-						"listen": [":{{env.SERVER_PORT}}"],
+						"listen": [":9080"],
 						"routes": [
 							{
 								"handle": [{
@@ -112,13 +118,16 @@ func TestServerlessPlugin_PostEcho(t *testing.T) {
 	// Initialize Caddy server
 	tester := caddytest.NewTester(t)
 	tester.InitServer(caddyJSON, "json")
-	defer tester.StopServer() // Ensure server is stopped
+    // defer tester.StopServer() // This was incorrect, caddytest.Tester has no StopServer method. Cleanup is handled by t.Cleanup().
+
 
 	// Prepare POST request
 	requestPayload := `{"message": "hello from caddy test"}`
 	requestBody := bytes.NewBufferString(requestPayload)
 
-	req, err := http.NewRequest("POST", tester.URL+"/echo", requestBody)
+	// Construct URL based on the configured port in the JSON config
+	serverURL := "http://localhost:9080"
+	req, err := http.NewRequest("POST", serverURL+"/echo", requestBody)
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -175,6 +184,120 @@ func TestServerlessPlugin_PostEcho(t *testing.T) {
 	}
 
 	t.Log("Serverless POST echo test completed successfully.")
+}
+
+func TestServerlessPlugin_PythonPostEcho(t *testing.T) {
+	// Skip if Docker is not available
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("Docker not found in PATH, skipping integration test")
+	}
+
+	imageFullName := buildTestImage(t, pyTestDockerImageName, commonTestDockerImageTag, pyEchoServerDir)
+	defer removeTestImage(t, imageFullName)
+
+	// Define Caddy JSON configuration
+	// Ensure admin API is configured to listen on caddytest.Default.AdminPort (2999)
+	// as caddytest will continue to try and communicate with it on that port.
+	caddyJSON := fmt.Sprintf(`
+	{
+		"admin": {
+			"listen": "localhost:2999"
+		},
+		"apps": {
+			"http": {
+				"servers": {
+					"srv0": {
+						"listen": [":9080"],
+						"routes": [
+							{
+								"handle": [{
+									"handler": "serverless",
+									"functions": [{
+										"methods": ["POST"],
+										"path": "/pyecho",
+										"image": "%s",
+										"port": 8080,
+										"timeout": "90s"
+									}]
+								}]
+							}
+						]
+					}
+				}
+			}
+		}
+	}
+	`, imageFullName) // Increased timeout for Python/Flask cold start
+
+	tester := caddytest.NewTester(t)
+	tester.InitServer(caddyJSON, "json")
+	// defer tester.StopServer() // This was incorrect.
+
+	requestPayload := `{"message": "hello from caddy python test"}`
+	requestBody := bytes.NewBufferString(requestPayload)
+
+	// Construct URL based on the configured port in the JSON config
+	serverURL := "http://localhost:9080"
+	req, err := http.NewRequest("POST", serverURL+"/pyecho", requestBody)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Custom-Py-Header", "CaddyServerlessPythonTest")
+	req.Header.Set("User-Agent", "Caddy-PyTest-Agent")
+
+	client := &http.Client{Timeout: 120 * time.Second} // Further increased timeout
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		t.Fatalf("Expected status %d, got %d. Response body: %s", http.StatusOK, resp.StatusCode, string(bodyBytes))
+	}
+
+	responseBodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Failed to read response body: %v", err)
+	}
+
+	// Python's jsonify might return a map[string]interface{} for headers
+	var pyEchoResp struct {
+		Headers map[string]string `json:"headers"`
+		Body    string            `json:"body"`
+	}
+	if err := json.Unmarshal(responseBodyBytes, &pyEchoResp); err != nil {
+		t.Fatalf("Failed to unmarshal Python response JSON: %v. Body: %s", err, string(responseBodyBytes))
+	}
+
+	// Verify headers (case might differ with Flask, so check for presence and value)
+	// Flask typically preserves original casing or Title-Cases them.
+	// http.Header.Get() is case-insensitive for lookup.
+	// The python app does `dict(request.headers)` which should preserve case as received by Flask.
+	// Let's create an http.Header from the map for easier, case-insensitive checking.
+	receivedHeaders := make(http.Header)
+	for k, v := range pyEchoResp.Headers {
+		receivedHeaders.Set(k, v)
+	}
+
+	if contentType := receivedHeaders.Get("Content-Type"); !strings.Contains(strings.ToLower(contentType), "application/json") {
+		t.Errorf("Expected echoed 'Content-Type' header to contain 'application/json', got '%s'", contentType)
+	}
+	if customHeader := receivedHeaders.Get("X-Custom-Py-Header"); customHeader != "CaddyServerlessPythonTest" {
+		t.Errorf("Expected echoed 'X-Custom-Py-Header' to be 'CaddyServerlessPythonTest', got '%s'", customHeader)
+	}
+	if userAgent := receivedHeaders.Get("User-Agent"); userAgent != "Caddy-PyTest-Agent" {
+		t.Errorf("Expected echoed 'User-Agent' to be 'Caddy-PyTest-Agent', got '%s'", userAgent)
+	}
+	
+	// Verify body
+	if pyEchoResp.Body != requestPayload {
+		t.Errorf("Expected Python echoed body to be '%s', got '%s'", requestPayload, pyEchoResp.Body)
+	}
+
+	t.Log("Serverless Python POST echo test completed successfully.")
 }
 
 // TestMain can be used for global setup/teardown if needed,
