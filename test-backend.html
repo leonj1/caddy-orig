@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caddy Serverless Backend Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        .status {
+            background: #27ae60;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .info {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        code {
+            background: #34495e;
+            color: #ecf0f1;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Caddy Serverless Backend</h1>
+        
+        <div class="status">
+            ✅ Backend service is running successfully!
+        </div>
+        
+        <div class="info">
+            <h3>Test Information</h3>
+            <p><strong>Service:</strong> Nginx Backend (for reverse proxy testing)</p>
+            <p><strong>Container:</strong> caddy-backend</p>
+            <p><strong>Purpose:</strong> Demonstrates Caddy serverless reverse proxy functionality</p>
+        </div>
+        
+        <div class="info">
+            <h3>Available Endpoints</h3>
+            <ul>
+                <li><code>GET /</code> - Main serverless response</li>
+                <li><code>GET /health</code> - Health check endpoint</li>
+                <li><code>GET /api/*</code> - Proxied to this backend service</li>
+                <li><code>GET /protected/*</code> - JWT protected endpoints</li>
+            </ul>
+        </div>
+        
+        <div class="info">
+            <h3>Testing Commands</h3>
+            <pre><code># Test main endpoint
+curl http://localhost:8080
+
+# Test health check
+curl http://localhost:8080/health
+
+# Test reverse proxy (this page)
+curl http://localhost:8080/api/
+
+# Test JWT protected (requires token)
+curl http://localhost:8080/protected/data</code></pre>
+        </div>
+        
+        <p style="text-align: center; color: #7f8c8d; margin-top: 30px;">
+            <small>Powered by Caddy Serverless with JWT Authentication</small>
+        </p>
+    </div>
+</body>
+</html>

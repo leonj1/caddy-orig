@@ -1,7 +1,7 @@
 _gitignore/
 *.log
 Caddyfile
-Caddyfile.*
+
 !caddyfile/
 !caddyfile.go
 
@@ -29,3 +29,6 @@ caddy-dist
 # IDE files
 .idea/
 .vscode/
+
+bin
+

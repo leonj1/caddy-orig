@@ -1,0 +1,65 @@
+{
+    # Global options
+    auto_https off
+    http_port 8001
+    https_port 8002  # Move HTTPS to a different port
+}
+
+http://localhost:8001 {
+    # Different rate limits for different endpoints
+    @get_requests {
+        path /api/*
+        method GET
+    }
+    
+    @post_requests {
+        path /api/*
+        method POST PUT PATCH DELETE
+    }
+    
+    rate_limit {
+        zone get_zone {
+            match {
+                path_regexp api ^/api/.*
+                method GET
+            }
+            key static
+            window 1m
+            events 100
+        }
+        
+        zone post_zone {
+            match {
+                path_regexp api ^/api/.*
+                method POST PUT PATCH DELETE
+            }
+            key static
+            window 1m
+            events 20
+        }
+    }
+
+    # Serverless configuration
+    route {
+        serverless {
+            function {
+                methods GET POST PUT DELETE
+                path /api/users/.*
+                image myfunction:latest
+                timeout 30s
+                port 8080
+            }
+        }
+    }
+
+    # Return 429 Too Many Requests with a custom error message
+    handle_errors {
+        @rate_limited {
+            expression {http.error.status_code} == 429
+        }
+        respond @rate_limited 429 {
+            body "Rate limit exceeded. Please try again later."
+        }
+    }
+}
+
