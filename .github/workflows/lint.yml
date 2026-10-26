@@ -41,7 +41,7 @@ jobs:
         - os: windows
           OS_LABEL: windows-latest
 
-    runs-on: ${{ matrix.OS_LABEL }}
+    runs-on: "${{ (matrix.OS_LABEL) == 'ubuntu-latest' && fromJSON('[\"self-hosted\",\"linux\",\"x64\"]') || (matrix.OS_LABEL) == 'macos-14' && fromJSON('[\"self-hosted\",\"macOS\",\"ARM64\"]') || (matrix.OS_LABEL) == 'windows-latest' && fromJSON('[\"self-hosted\",\"windows\",\"x64\"]') || (matrix.OS_LABEL) }}"
 
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +62,7 @@ jobs:
           # only-new-issues: true
 
   govulncheck:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: govulncheck
         uses: golang/govulncheck-action@v1

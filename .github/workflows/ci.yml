@@ -54,7 +54,7 @@ jobs:
           CADDY_BIN_PATH: ./cmd/caddy/caddy.exe
           SUCCESS: 'True'
 
-    runs-on: ${{ matrix.OS_LABEL }}
+    runs-on: "${{ (matrix.OS_LABEL) == 'ubuntu-latest' && fromJSON('[\"self-hosted\",\"linux\",\"x64\"]') || (matrix.OS_LABEL) == 'macos-14' && fromJSON('[\"self-hosted\",\"macOS\",\"ARM64\"]') || (matrix.OS_LABEL) == 'windows-latest' && fromJSON('[\"self-hosted\",\"windows\",\"x64\"]') || (matrix.OS_LABEL) }}"
 
     steps:
     - name: Checkout code
@@ -142,7 +142,7 @@ jobs:
 
   s390x-test:
     name: test (s390x on IBM Z)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     if: github.event.pull_request.head.repo.full_name == 'caddyserver/caddy' && github.actor != 'dependabot[bot]'
     continue-on-error: true  # August 2020: s390x VM is down due to weather and power issues
     steps:
@@ -193,7 +193,7 @@ jobs:
           CI_USER: ${{ secrets.CI_USER }}
 
   goreleaser-check:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     if: github.event.pull_request.head.repo.full_name == 'caddyserver/caddy' && github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout code

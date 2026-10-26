@@ -39,7 +39,7 @@ jobs:
         - go: '1.24'
           GO_SEMVER: '~1.24.1'
 
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     continue-on-error: true
     steps:
       - name: Checkout code
